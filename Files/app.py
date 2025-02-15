@@ -3,12 +3,12 @@ import pandas as pd
 from io import BytesIO
 import os
 from PIL import Image
-from model import extract_info_img
+from model import extract_info_img_paid_out , extract_info_img_paid_in , extract_account_details
 from data_output import json_to_csv, json_to_xls
 import time
 
 def create_UI():
-    st.set_page_config("Receipt2Sheet", initial_sidebar_state="collapsed")
+    st.set_page_config("Receipt2Sheet 2.0", initial_sidebar_state="collapsed")
     st.markdown(
         """
         <style>
@@ -39,13 +39,13 @@ def create_UI():
 
         div[data-testid="column"] * {
             width: fit-content !important;
-            vertical-align: left;  /* Align items to the left */
+            vertical-align: left;  /* Align items to the left */
         }
 
         .stFileUploader {
-            width: 100%;  /* Make the file uploader full width */
-            border-radius: 5px;  /* Rounded corners */
-            text-align: center;  /* Center text */
+            width: 100%;  /* Make the file uploader full width */
+            border-radius: 5px;  /* Rounded corners */
+            text-align: center;  /* Center text */
         }
 
         [data-testid='stFileUploader'] section {
@@ -54,7 +54,7 @@ def create_UI():
         }
 
         [data-testid='stFileUploader'] section > input + div {
-            display: none;  /* Hide the default uploader text */
+            display: none;  /* Hide the default uploader text */
         }
 
         .sidebar .stSelectbox, 
@@ -71,17 +71,11 @@ def create_UI():
         unsafe_allow_html=True
     )
 
-    st.markdown("<div class='welcome-message'>Welcome to Receipt2Sheet!</div>", unsafe_allow_html=True)
+    st.markdown("<div class='welcome-message'>Welcome to Receipt2Sheet 2.0 !</div>", unsafe_allow_html=True)
     
     st.sidebar.title("Settings")
     
     # Language selection dropdown
-    language = st.sidebar.selectbox(
-        "Select Language for Extraction",
-        ["English", "Spanish", "French", "German", "Chinese", "Japanese", "Korean", "Hindi",'Urdu',"Arabic"],
-        key="language_selection"
-    )
-    
 
 
     st.sidebar.title("Upload Image(s)")
@@ -106,25 +100,71 @@ def create_UI():
         download_placeholder = st.empty()
 
     if generate_button and uploaded_files_images:
-        st.info(f"Processing image(s) with language: {language}...")
-        json_output = extract_info_img(uploaded_files_images, language)  # Pass language to the function if supported
+        st.info("Processing image(s)...")
+    
+    # Extract data
+        json_output_paid_out = extract_info_img_paid_out(uploaded_files_images)  
+        json_output_paid_in = extract_info_img_paid_in(uploaded_files_images)   
+        json_output_details = extract_account_details(uploaded_files_images)
 
+        # Merge extracted data
+        merged_data = {
+            "account_details": json_output_details,
+            "paid_in_transactions": json_output_paid_in.get("paid_in_transactions", []),
+            "paid_out_transactions": json_output_paid_out.get("paid_out_transactions", [])
+        }
+
+        # Convert account details into a DataFrame
+        account_df = pd.DataFrame([merged_data["account_details"]])  # Wrap in list for single-row DF
+        
+        # Convert transactions into DataFrames
+        paid_in_df = pd.DataFrame(merged_data["paid_in_transactions"])
+        paid_out_df = pd.DataFrame(merged_data["paid_out_transactions"])
+
+        # Add a column to indicate transaction type
+        paid_in_df["Transaction Type"] = "Paid In"
+        paid_out_df["Transaction Type"] = "Paid Out"
+
+        # Combine transaction DataFrames
+        transactions_df = pd.concat([paid_in_df, paid_out_df], ignore_index=True)
+
+        # Save as CSV or XLS
         if option == "CSV":
-            csv_data = json_to_csv(json_output)
+            csv_buffer = BytesIO()
+            
+            # Save Account Details
+            account_df.to_csv(csv_buffer, index=False)
+            csv_buffer.write(b"\n")  # Add a newline between sections
+            
+            # Save Transactions
+            transactions_df.to_csv(csv_buffer, index=False)
+            
+            csv_data = csv_buffer.getvalue()
+            
+            # Provide Download Button
             download_placeholder.download_button(
-                label="Download",
+                label="Download CSV",
                 data=csv_data,
-                file_name="output.csv",
+                file_name="bank_statement.csv",
                 mime="text/csv"
             )
+
         elif option == "XLS":
-            xls_data = json_to_xls(json_output)
+            xls_buffer = BytesIO()
+            with pd.ExcelWriter(xls_buffer, engine="xlsxwriter") as writer:
+                account_df.to_excel(writer, sheet_name="Account Details", index=False)
+                transactions_df.to_excel(writer, sheet_name="Transactions", index=False)
+            
+            xls_data = xls_buffer.getvalue()
+            
+            # Provide Download Button
             download_placeholder.download_button(
-                label="Download",
-                data=xls_data.getvalue(),
-                file_name="output.xlsx",
+                label="Download XLS",
+                data=xls_data,
+                file_name="bank_statement.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+        #     )
 
 if __name__ == "__main__":
     create_UI()
