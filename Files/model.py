@@ -4,7 +4,6 @@ import google.generativeai as genai
 from PIL import Image
 import streamlit as st
 import json
-import re
 import unicodedata
 from googletrans import Translator  # Import Google Translate API
 
@@ -13,123 +12,225 @@ load_dotenv("keys.env")
 google_api_key = os.getenv("Gemini_key")
 
 
-def clean_item_name_general(name):
-    """
-    Cleans and normalizes item names for better readability and translation across languages.
-
-    Args:
-        name: The raw item name as a string.
-
-    Returns:
-        A cleaned and normalized string.
-    """
-    # Normalize Unicode
-    name = unicodedata.normalize('NFKC', name)
-
-    # Insert space between lowercase and uppercase letters
-    name = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', name)
-
-    # Replace common separators with spaces
-    name = re.sub(r'[._\-]', ' ', name)
-
-    # Replace non-alphanumeric characters
-    name = re.sub(r'[^\w\s]', ' ', name)
-
-    # Remove extra whitespace
-    name = re.sub(r'\s+', ' ', name).strip()
-
-    return name
-
-def refine_with_ai(json_data):
-    """
-    Refines the translated receipt information using AI for context-specific corrections.
-
-    Args:
-        json_data: JSON-formatted receipt data to refine.
-
-    Returns:
-        Refined JSON data as a string.
-    """
-    genai.configure(api_key=google_api_key)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        generation_config={"response_mime_type": "application/json"},
-    )
-
-    # Create a new prompt for refining translation
-    prompt = f'''
-    Please refine the following receipt information, ensuring accuracy and proper structure AND TRANSLATE THE ITEM NAMES TO ENGLISH:
-    ```json
-    + ''' + json_data +''' 
-    '''
-    result = model.generate_content([prompt])
-    return result.text  # Assuming the response is in JSON format
-
-
-def extract_info_img(img_paths, language): 
-
+def extract_info_img_paid_out(img_paths):
     images_ = [Image.open(img_path) for img_path in img_paths]
 
-    # Configure generative AI model
     genai.configure(api_key=google_api_key)
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name="gemini-2.0-flash",
         generation_config={"response_mime_type": "application/json"},
     )
 
-    # Define prompt for initial extraction
-    prompt = f'''
-    Extract receipt information from the image, which is in {language}.
-    Ensure all item names are written in English. If the items' names are not in English, translate them to English or provide their English equivalents.
-    Extract the following information from the image:
-    Shop or Mart Name
-    Item Names
-    Quantities (if unspecified, assume 1)
-    Prices
-    Currency Type (infer from context, using the full name instead of symbols)
-    Structure the extracted information into the following JSON format:
-    json
-    Copy
-    Edit
-    {{
-    "receipts": [
-        {{
-        "shop": "Shop Name",
-        "items": [
-            {{
-            "item": "Item Name",
-            "quantity": 1,
-            "price": 10.99
-            }}
-            // Additional items...
-        ],
-        "currency": "Currency Name"
-        }}
-        // Additional receipts...
-    ]
-        }}
-        '''
-    
-    input_model = [prompt] + images_
-# Extract the content using the model
-    result = model.generate_content(input_model)
-    result_text = result.text  # Assuming the result text is in JSON format.
+    prompt = """
+    Extract only the 'Paid out' transaction details from the bank statement image. 
+    Do NOT extract or include 'Paid in' or 'Balance' data. 
 
-    # Parse and process the result
+    **Instructions:**
+    - Identify transactions where an amount is present under 'Paid out'.
+    - Ignore any transaction where 'Paid out' is missing, empty, null, or zero.
+    - Do NOT extract any other columns like 'Paid in' or 'Balance'.
+    - Format the extracted data in JSON.
+
+    **Fields to Extract:**
+    - **Date** (Format: 'DD MMM YY', e.g., '17 Jan 23')
+    - **Payment Type & Description** (e.g., 'DD EE LIMITED', 'VIS eBay 013-09590-02 LONDON')
+    - **Paid Out Amount** (Numeric value only, e.g., '2.49', '219.29')
+
+    **Output Format (Example):**
+    ```json
+    {
+        "paid_out_transactions": [
+            {
+                "date": "15 Jun 22",
+                "type": "VIS",
+                "description": "GATWICK DROP OFF CRAWLEY",
+                "amount": "5.00"
+            },
+            {
+                "date": "17 Jun 22",
+                "type": "DD",
+                "description": "EE LIMITED",
+                "amount": "25.00"
+            },
+            {
+                "date": "19 Jun 22",
+                "type": "VIS",
+                "description": "eBay 013-09590-02 LONDON",
+                "amount": "2.49"
+            }
+        ]
+    }
+    ```
+    **Rules:**
+    - Remove any transaction if 'Paid out' is **null, empty, zero, or missing**.
+    - Do NOT extract 'Paid in' or 'Balance' columns.
+    - Ensure correct JSON structure.
+    """
+
+    input_model = [prompt] + images_
+    result = model.generate_content(input_model)
+    result_text = result.text  # Assuming the result is in JSON format.
+
+    # Parse and clean the extracted data
     try:
         extracted_data = json.loads(result_text)
+
+        # Remove transactions where 'amount' is missing, empty, null, or "0.00"
+        if "paid_out_transactions" in extracted_data:
+            extracted_data["paid_out_transactions"] = [
+                txn for txn in extracted_data["paid_out_transactions"]
+                if txn.get("amount") not in [None, "", "0.00", 0, "0"]
+            ]
+        
     except json.JSONDecodeError:
         st.error("Failed to decode JSON response.")
         return None
 
-    # Clean, translate, and refine item names
-    for receipt in extracted_data.get('receipts', []):
-        for item in receipt.get('items', []):
-            # Clean and translate each item name
-            cleaned_name = clean_item_name_general(item.get('item', ''))
+    return extracted_data
 
-    # Refine the translated data using AI
-    refined_data = refine_with_ai(json.dumps(extracted_data, ensure_ascii=False, indent=4))
 
-    # Return the refined JSON structure
-    return refined_data
+def extract_info_img_paid_in(img_paths):
+    images_ = [Image.open(img_path) for img_path in img_paths]
+
+    genai.configure(api_key=google_api_key)
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        generation_config={"response_mime_type": "application/json"},
+    )
+
+    prompt = """
+    Extract only the 'Paid in' transaction details from the bank statement image.
+    Do NOT extract or include 'Paid out' or 'Balance' data.
+
+    **Instructions:**
+    - Identify transactions where an amount is present under 'Paid in'.
+    - Ignore any transaction where 'Paid in' is missing, empty, null, or zero.
+    - Do NOT extract any other columns like 'Paid out' or 'Balance'.
+    - Format the extracted data in JSON.
+
+    **Fields to Extract:**
+    - **Date** (Format: 'DD MMM YY', e.g., '17 Jan 23')
+    - **Payment Type & Description** (e.g., 'CR MIDLETON J V04', 'BOB THE BUILDER (U')
+    - **Paid In Amount** (Numeric value only, e.g., '390.00', '2,000.00')
+
+    **Output Format (Example):**
+    ```json
+    {
+        "paid_in_transactions": [
+            {
+                "date": "19 Jan 23",
+                "type": "CR",
+                "description": "Nicholas Solly & S",
+                "amount": "390.00"
+            },
+            {
+                "date": "20 Jan 23",
+                "type": "CR",
+                "description": "BOB THE BUILDER (U",
+                "amount": "2,000.00"
+            }
+        ]
+    }
+    ```
+    **Rules:**
+    - Remove any transaction if 'Paid in' is **null, empty, zero, or missing**.
+    - Do NOT extract 'Paid out' or 'Balance' columns.
+    - Ensure correct JSON structure.
+    """
+
+    input_model = [prompt] + images_
+    result = model.generate_content(input_model)
+    result_text = result.text
+
+    # Parse and clean the extracted data
+    try:
+        extracted_data = json.loads(result_text)
+
+        # Remove transactions where 'amount' is missing, empty, null, or "0.00"
+        if "paid_in_transactions" in extracted_data:
+            extracted_data["paid_in_transactions"] = [
+                txn for txn in extracted_data["paid_in_transactions"]
+                if txn.get("amount") not in [None, "", "0.00", 0, "0"]
+            ]
+    except json.JSONDecodeError:
+        st.error("Failed to decode JSON response.")
+        return None
+
+    return extracted_data
+
+
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+from PIL import Image
+import streamlit as st
+import json
+
+# Load environment variables for API keys
+load_dotenv("keys.env")
+google_api_key = os.getenv("Gemini_key")
+
+# Configure Gemini AI
+genai.configure(api_key=google_api_key)
+
+def extract_account_details(uploaded_files):
+    """
+    Extracts account details from a bank statement image, including:
+    - Image Name
+    - Account Name
+    - Account Number
+    - Statement Period
+    - Opening Balance
+    - Closing Balance
+    """
+    images_ = [Image.open(img) for img in uploaded_files]
+
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        generation_config={"response_mime_type": "application/json"},
+    )
+
+    prompt = """
+    Extract the following account details from the bank statement image:
+
+    **Fields to Extract:**
+    - **Image Name** (Extracted from the file name)
+    - **Account Name** (e.g., 'DC ELECTRICAL & PROPERTY SERVICES LTD')
+    - **Account Number** (e.g., '10123919')
+    - **Statement Period** (e.g., '12 June to 30 June 2022')
+    - **Opening Balance** (e.g., '564.41')
+    - **Closing Balance** (e.g., '241.60')
+
+    **Output Format (Example):**
+    ```json
+    {
+        "img_name": "bank_statement.jpg",
+        "accountName": "DC ELECTRICAL & PROPERTY SERVICES LTD",
+        "accountNumber": "10123919",
+        "statementPeriod": "12 June to 30 June 2022",
+        "openingBalance": "564.41",
+        "closingBalance": "241.60"
+    }
+    ```
+
+    **Rules:**
+    - Extract data accurately from the document.
+    - Ignore any unrelated text or headers.
+    - Ensure correct JSON formatting.
+    """
+
+    input_model = [prompt] + images_
+    result = model.generate_content(input_model)
+    result_text = result.text  # Assuming the result is in JSON format.
+
+    try:
+        extracted_data = json.loads(result_text)
+
+        # Extract file name from the UploadedFile object
+        extracted_data["img_name"] = uploaded_files[0].name  
+
+    except json.JSONDecodeError:
+        st.error("Failed to decode JSON response.")
+        return None
+
+    return extracted_data
