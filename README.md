@@ -1,5 +1,4 @@
 
----
 
 # 🏦 Bank Statement Data Extractor  
 
@@ -8,6 +7,8 @@ A **Streamlit-based** application that extracts account details and transactions
 ## ✨ Features  
 ✅ Extracts **account details** from bank statements  
 ✅ Identifies and categorizes **Paid In** and **Paid Out** transactions  
+✅ Uses **Gemini AI** for intelligent data extraction  
+✅ Translates extracted text using **Google Translate API**  
 ✅ Merges all data into a structured **DataFrame**  
 ✅ Exports the processed data as **CSV or Excel**  
 ✅ Provides an easy **download button** for the final file  
@@ -15,9 +16,11 @@ A **Streamlit-based** application that extracts account details and transactions
 ## 📌 Tech Stack  
 - **Python** 🐍  
 - **Streamlit** (for UI)  
-- **OpenCV & Tesseract** (for OCR)  
+- **Google Gemini AI** (for intelligent OCR and data extraction)  
 - **Pandas** (for data processing)  
 - **XlsxWriter** (for Excel exports)  
+- **Pillow (PIL)** (for image handling)  
+- **Dotenv** (for managing API keys)  
 
 ## 🚀 How to Run  
 1. Clone the repository:  
@@ -29,11 +32,15 @@ A **Streamlit-based** application that extracts account details and transactions
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the Streamlit app:  
+3. Create a `keys.env` file and add your **Google Gemini API Key**:  
+   ```
+   Gemini_key=your_api_key_here
+   ```
+4. Run the Streamlit app:  
    ```bash
    streamlit run app.py
    ```
-4. Upload **bank statement images** and download the extracted data.  
+5. Upload **bank statement images** and download the extracted data.  
 
 ## 📂 Output Example  
 - **CSV**: Account details and transactions saved as a structured CSV file.  
