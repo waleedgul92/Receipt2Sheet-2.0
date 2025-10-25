@@ -32,9 +32,10 @@ A **Streamlit-based** application that extracts account details and transactions
    ```bash
    pip install -r requirements.txt
    ```
-3. Create a `keys.env` file and add your **Google Gemini API Key**:  
+3. Create a `keys.env` file and add your **Google Gemini API Key** and **model_name**:  
    ```
    Gemini_key=your_api_key_here
+   Model_name= model-name
    ```
 4. Run the Streamlit app:  
    ```bash
